@@ -65,8 +65,8 @@ struct AirRecordPolicy {
         var inspections = 0
     }
 
-    let retryWindow: TimeInterval
-    let maximumInspections: Int
+    private(set) var retryWindow: TimeInterval
+    private(set) var maximumInspections: Int
     private var windows: [UUID: Window] = [:]
     private var isEnabled = false
     private(set) var reservedStarts: Set<UUID> = []
@@ -75,6 +75,14 @@ struct AirRecordPolicy {
 
     init(retryWindow: TimeInterval = 20, maximumInspections: Int = 24) {
         self.retryWindow = max(0, retryWindow)
+        self.maximumInspections = max(1, maximumInspections)
+    }
+
+    /// Changes the readiness window opened by later decisions. A window that is
+    /// already open keeps its deadline, and handled, reserved, or expired calls
+    /// are never reopened by a configuration change.
+    mutating func configure(retryWindow: TimeInterval, maximumInspections: Int) {
+        self.retryWindow = retryWindow.isFinite ? max(0, retryWindow) : self.retryWindow
         self.maximumInspections = max(1, maximumInspections)
     }
 

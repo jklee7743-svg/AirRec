@@ -7,6 +7,7 @@ swiftc "$AIRRECORD_ROOT/Sources/Core/Automation/AirRecordPolicy.swift" \
   "$AIRRECORD_ROOT/Sources/Core/Automation/AirRecordActivationFailurePolicy.swift" \
   "$AIRRECORD_ROOT/Sources/Core/Automation/AirRecordOutgoingWaitPolicy.swift" \
   "$AIRRECORD_ROOT/Sources/Core/Automation/AirRecordCallEndWaitPolicy.swift" \
+  "$AIRRECORD_ROOT/Sources/Core/Automation/AirRecordIncomingWaitPolicy.swift" \
   "$AIRRECORD_ROOT/Tests/LegacySupport/Swift/AirRecordKeepAliveLease.swift" \
   "$AIRRECORD_ROOT/Tests/LegacySupport/Swift/AirRecordKeepAliveWire.swift" \
   "$AIRRECORD_ROOT/Sources/Core/Background/AirRecordLocationSessionPolicy.swift" \

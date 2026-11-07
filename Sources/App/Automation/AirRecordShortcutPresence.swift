@@ -11,15 +11,24 @@ final class AirRecordShortcutPresence: ObservableObject {
 
     @Published private(set) var lastActionRunAt: Date?
     @Published private(set) var lastEndActionRunAt: Date?
+    @Published private(set) var lastIncomingActionRunAt: Date?
 
     private let defaults: UserDefaults
     private static let actionKey = "AirRecord.shortcuts.outgoing.lastActionRunAt"
     private static let endActionKey = "AirRecord.shortcuts.callEnd.lastActionRunAt"
+    private static let incomingActionKey = "AirRecord.shortcuts.incoming.lastActionRunAt"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         lastActionRunAt = defaults.object(forKey: Self.actionKey) as? Date
         lastEndActionRunAt = defaults.object(forKey: Self.endActionKey) as? Date
+        lastIncomingActionRunAt = defaults.object(forKey: Self.incomingActionKey) as? Date
+    }
+
+    func recordIncomingActionRun() {
+        let now = Date()
+        lastIncomingActionRunAt = now
+        defaults.set(now, forKey: Self.incomingActionKey)
     }
 
     func recordActionRun() {

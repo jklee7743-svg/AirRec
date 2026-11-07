@@ -5,7 +5,7 @@ import Foundation
 
 @MainActor
 struct AirRecordShortcutStatusView: View {
-    enum Kind { case outgoing, end }
+    enum Kind { case outgoing, incoming, end }
 
     let accent: Color
     var kind: Kind = .outgoing
@@ -14,16 +14,25 @@ struct AirRecordShortcutStatusView: View {
     private var lastActionRunAt: Date? {
         switch kind {
         case .outgoing: return presence.lastActionRunAt
+        case .incoming: return presence.lastIncomingActionRunAt
         case .end: return presence.lastEndActionRunAt
         }
     }
 
     private var title: String {
-        kind == .outgoing ? "AirRec 발신 자동화" : "AirRec 발신종료 자동화"
+        switch kind {
+        case .outgoing: return "AirRec 발신 자동화"
+        case .incoming: return "AirRec 수신 자동화"
+        case .end: return "AirRec 발신종료 자동화"
+        }
     }
 
     private var systemImage: String {
-        kind == .outgoing ? "phone.arrow.up.right" : "phone.down.fill"
+        switch kind {
+        case .outgoing: return "phone.arrow.up.right"
+        case .incoming: return "phone.arrow.down.left"
+        case .end: return "phone.down.fill"
+        }
     }
 
     var body: some View {

@@ -44,6 +44,18 @@ private final class AirRecordAutomationGate: @unchecked Sendable {
     private var policy = AirRecordPolicy()
     private var moreReservations: Set<UUID> = []
     private var deadlines: [UUID: TimeInterval] = [:]
+    private var allowLocked = false
+    private var retryWindow: TimeInterval = 20
+
+    /// Options apply to readiness windows opened afterwards. Reservations and
+    /// handled calls are kept, so a change can never grant a second start tap.
+    func configure(allowLocked: Bool, retryWindow: TimeInterval, maximumInspections: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.allowLocked = allowLocked
+        self.retryWindow = retryWindow
+        policy.configure(retryWindow: retryWindow, maximumInspections: maximumInspections)
+    }
 
     func update(_ calls: [AirRecordCallState]) {
         lock.lock()
@@ -79,7 +91,7 @@ private final class AirRecordAutomationGate: @unchecked Sendable {
         let now = ProcessInfo.processInfo.systemUptime
         let decision = policy.decision(calls: calls, enabled: enabled, now: now)
         guard case .inspect(let id) = decision else { return (decision, nil) }
-        if deadlines[id] == nil { deadlines[id] = now + 20 }
+        if deadlines[id] == nil { deadlines[id] = now + retryWindow }
         return (decision, Inspection(generation: generation, callID: id,
                                      mayOpenMore: !moreReservations.contains(id)))
     }
@@ -90,7 +102,7 @@ private final class AirRecordAutomationGate: @unchecked Sendable {
             && active.count == 1 && active[0].id == inspection.callID
             && active[0].hasConnected && !active[0].isOnHold
             && deadlines[inspection.callID].map { ProcessInfo.processInfo.systemUptime <= $0 } == true
-            && lockState.isUnlocked
+            && (allowLocked || lockState.isUnlocked)
     }
 
     func permits(_ inspection: Inspection) -> Bool {
@@ -147,6 +159,10 @@ final class AirRecordMonitor: NSObject, ObservableObject, CXCallObserverDelegate
     @Published private(set) var activationError: String? = nil
     @Published private(set) var status = "AirRec 비활성화됨"
     @Published private(set) var recentEvents: [String] = []
+    /// Experimental: also inspect a call while the device reports locked.
+    @Published private(set) var allowsLockedAttempts: Bool
+    /// Experimental: 60-second readiness window instead of 20 seconds.
+    @Published private(set) var extendsPreparationWindow: Bool
 
     var diagnosticSummary: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
@@ -159,6 +175,8 @@ final class AirRecordMonitor: NSObject, ObservableObject, CXCallObserverDelegate
                  "위치 표시: \(standby.indicatorStatusText)",
                  "백그라운드 앱 새로 고침: \(standby.backgroundRefreshStatusText)",
                  "저전력 모드: \(standby.lowPowerModeEnabled ? "켜짐" : "꺼짐")",
+                 "잠금 상태 시도: \(allowsLockedAttempts ? "켜짐" : "꺼짐")",
+                 "녹음 준비 시간: \(extendsPreparationWindow ? 60 : 20)초",
                  "마지막 실행 점검: \(lastStandbyCheck.map { $0.formatted(date: .omitted, time: .standard) } ?? "없음")"] + recentEvents).joined(separator: "\n")
     }
 
@@ -184,11 +202,16 @@ final class AirRecordMonitor: NSObject, ObservableObject, CXCallObserverDelegate
     private var recordingWaitPreparationResult: Bool?
     private let defaults: UserDefaults
     private static let enabledKey = "CallTap.RawAX.autoStartEnabled"
+    private static let lockedAttemptsKey = "AirRec.incoming.allowLockedAttempts"
+    private static let extendedWindowKey = "AirRec.incoming.extendedPreparationWindow"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         isEnabled = defaults.bool(forKey: Self.enabledKey)
+        allowsLockedAttempts = defaults.bool(forKey: Self.lockedAttemptsKey)
+        extendsPreparationWindow = defaults.bool(forKey: Self.extendedWindowKey)
         super.init()
+        applyAutomationOptions()
         standby.onStopped = { [weak self] message in
             guard let self, self.isRunning || self.isPreparing else { return }
             if self.isPreparing {
@@ -533,6 +556,34 @@ final class AirRecordMonitor: NSObject, ObservableObject, CXCallObserverDelegate
         if UIApplication.shared.applicationState == .background { appDidEnterBackground() }
         setStatus(waitingStatus)
         evaluate()
+    }
+
+    func setAllowsLockedAttempts(_ enabled: Bool) {
+        guard enabled != allowsLockedAttempts else { return }
+        allowsLockedAttempts = enabled
+        defaults.set(enabled, forKey: Self.lockedAttemptsKey)
+        applyAutomationOptions()
+        recordEvent(enabled ? "잠금 상태 통화 녹음 시도 켜짐" : "잠금 상태 통화 녹음 시도 꺼짐")
+    }
+
+    func setExtendsPreparationWindow(_ enabled: Bool) {
+        guard enabled != extendsPreparationWindow else { return }
+        extendsPreparationWindow = enabled
+        defaults.set(enabled, forKey: Self.extendedWindowKey)
+        applyAutomationOptions()
+        recordEvent("녹음 준비 시간 \(enabled ? 60 : 20)초")
+    }
+
+    private func applyAutomationOptions() {
+        // 0.8-second polling: 24 inspections cover 20 s, 80 cover 60 s.
+        gate.configure(allowLocked: allowsLockedAttempts,
+                       retryWindow: extendsPreparationWindow ? 60 : 20,
+                       maximumInspections: extendsPreparationWindow ? 80 : 24)
+    }
+
+    /// Lets Shortcut observers add a fixed, non-sensitive line to the activity log.
+    func noteShortcutEvent(_ value: String) {
+        recordEvent(value)
     }
 
     func stop() {

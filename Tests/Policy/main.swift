@@ -750,4 +750,92 @@ do {
     check(Wait.Result.noActiveCalls.allCallsEnded, "no active calls maps to true")
 }
 
-print("AirRecordPolicy: call safety, lease recovery, bounded IPC, permissions, waits, call-end waits and activation failure ownership passed")
+do {
+    var policy = AirRecordPolicy()
+    policy.configure(retryWindow: 60, maximumInspections: 80)
+    check(policy.retryWindow == 60 && policy.maximumInspections == 80, "configured window is stored")
+    check(policy.decision(calls: [call()], enabled: true, now: 0) == .inspect(firstID),
+          "extended window opens on connection")
+    check(policy.decision(calls: [call()], enabled: true, now: 45) == .inspect(firstID),
+          "extended window still inspects after twenty seconds")
+    check(policy.decision(calls: [call()], enabled: true, now: 61) == .expired(firstID),
+          "extended window still has a deadline")
+    policy.configure(retryWindow: .nan, maximumInspections: 0)
+    check(policy.retryWindow == 60 && policy.maximumInspections == 1,
+          "invalid configuration keeps a finite window and at least one inspection")
+}
+
+do {
+    var policy = AirRecordPolicy()
+    check(policy.decision(calls: [call()], enabled: true, now: 0) == .inspect(firstID), "default window opens")
+    policy.configure(retryWindow: 60, maximumInspections: 80)
+    check(policy.decision(calls: [call()], enabled: true, now: 21) == .expired(firstID),
+          "a window opened before reconfiguration keeps its original deadline")
+    check(policy.reserveStart(for: firstID, calls: [call()]) == false,
+          "reconfiguration never reopens an expired call")
+}
+
+do {
+    typealias Wait = AirRecordIncomingWaitPolicy
+    func incoming(_ id: UUID, outgoing: Bool = false, ended: Bool = false) -> Wait.Call {
+        Wait.Call(id: id, isOutgoing: outgoing, hasEnded: ended)
+    }
+    check(Wait.boundedTimeout(0) == 1 && Wait.boundedTimeout(3600) == 3600
+          && Wait.boundedTimeout(100_000) == 10_800 && Wait.boundedTimeout(.nan) == 3600,
+          "incoming waits are bounded to one second through three hours")
+
+    var fresh = Wait(startedAt: 10, timeout: 60, initialCalls: [])
+    check(fresh.decision(now: 10, calls: [], requireCellular: false, cellularCalls: nil) == .waiting,
+          "no call keeps waiting")
+    check(fresh.decision(now: 11, calls: [incoming(firstID, outgoing: true)],
+                         requireCellular: false, cellularCalls: nil) == .waiting,
+          "an outgoing call never satisfies an incoming wait")
+    check(fresh.decision(now: 12, calls: [incoming(secondID)], requireCellular: false,
+                         cellularCalls: nil) == .finished(.incoming),
+          "a new ringing incoming call finishes the wait before connection")
+    check(fresh.decision(now: 13, calls: [], requireCellular: false, cellularCalls: nil,
+                         cancelled: true) == .finished(.incoming),
+          "a finished incoming wait is immutable")
+
+    var existing = Wait(startedAt: 0, timeout: 60, initialCalls: [incoming(firstID)])
+    check(existing.decision(now: 1, calls: [incoming(firstID)], requireCellular: false,
+                            cellularCalls: 1) == .waiting,
+          "a call already active when the wait began is not a new arrival")
+    check(existing.decision(now: 2, calls: [incoming(firstID, ended: true), incoming(secondID)],
+                            requireCellular: false, cellularCalls: 1) == .finished(.incoming),
+          "a later incoming call after the old one ended is detected")
+
+    var waiting = Wait(startedAt: 0, timeout: 60, initialCalls: [])
+    check(waiting.decision(now: 1, calls: [incoming(firstID, outgoing: true), incoming(secondID)],
+                           requireCellular: false, cellularCalls: 2) == .waiting,
+          "call waiting during another call is never a single recordable call")
+
+    var cellular = Wait(startedAt: 0, timeout: 60, initialCalls: [])
+    check(cellular.decision(now: 1, calls: [incoming(firstID)], requireCellular: true,
+                            cellularCalls: 0) == .waiting,
+          "a CallKit-only internet call keeps waiting when cellular calls are required")
+    check(cellular.decision(now: 2, calls: [incoming(firstID)], requireCellular: true,
+                            cellularCalls: 1) == .finished(.incoming),
+          "CoreTelephony evidence finishes a cellular-only wait")
+    var unknown = Wait(startedAt: 0, timeout: 60, initialCalls: [])
+    check(unknown.decision(now: 1, calls: [incoming(firstID)], requireCellular: true,
+                           cellularCalls: nil) == .finished(.incoming),
+          "an unavailable CoreTelephony answer does not block detection")
+
+    var late = Wait(startedAt: 0, timeout: 5, initialCalls: [])
+    check(late.decision(now: 5, calls: [incoming(firstID)], requireCellular: false,
+                        cellularCalls: nil) == .finished(.timedOut),
+          "evidence at the deadline is too late")
+    var cancelled = Wait(startedAt: 0, timeout: 60, initialCalls: [])
+    check(cancelled.decision(now: 1, calls: [incoming(firstID)], requireCellular: false,
+                             cellularCalls: nil, cancelled: true) == .finished(.cancelled),
+          "cancellation wins over a simultaneous call")
+    var backwards = Wait(startedAt: 10, timeout: 60, initialCalls: [])
+    check(backwards.decision(now: 9, calls: [], requireCellular: false,
+                             cellularCalls: nil) == .finished(.invalidClock),
+          "a backwards clock ends the incoming wait")
+    check(Wait.Result.incoming.detectedIncoming && !Wait.Result.timedOut.detectedIncoming,
+          "only incoming maps to true")
+}
+
+print("AirRecordPolicy: call safety, lease recovery, bounded IPC, permissions, waits, call-end waits, incoming waits, configurable windows and activation failure ownership passed")

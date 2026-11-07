@@ -91,9 +91,8 @@ struct AirRecordGlassView: View {
             monitoringCard
             standbySummary
             AirRecordShortcutStatusView(accent: accent)
+            AirRecordShortcutStatusView(accent: accent, kind: .incoming)
             AirRecordShortcutStatusView(accent: accent, kind: .end)
-            AirRecordPlannedFeatureView(title: "AirRec 수신 자동화", systemImage: "phone.arrow.down.left", accent: accent)
-            AirRecordPlannedFeatureView(title: "AirRec 수신종료 자동화", systemImage: "phone.down.fill", accent: accent)
             AirRecordPlannedFeatureView(title: "AirRec 메모 이름 수정", systemImage: "note.text", accent: accent)
             AirRecordPlannedFeatureView(title: "AirBeep (통화 녹음 고지 제거)", systemImage: "speaker.slash", accent: accent)
             AirRecordPlannedFeatureView(title: "AirBeep2 (통화 녹음 카운트다운 제거)", systemImage: "timer", accent: accent)
@@ -194,6 +193,7 @@ struct AirRecordGlassView: View {
             preparationCard
             backgroundCard
             shortcutCard
+            incomingCard
             AirRecordVersionLabel(version: version)
                 .font(.footnote)
                 .frame(maxWidth: .infinity).padding(.vertical, 4)
@@ -370,6 +370,39 @@ struct AirRecordGlassView: View {
                     AirRecordInfoRow("3. 발신을 감지하면 데이터 끄기", value: "‘발신’의 최대 대기 시간에 1~180초를 입력할 수 있습니다. 기본값은 20초이며, 25초를 넘기면 대기 중 iOS 진행 표시가 나타날 수 있습니다. 결과가 ‘예’일 때만 ‘셀룰러 데이터 끄기 → 발신종료 → 셀룰러 데이터 켜기’를 실행하세요.")
                     AirRecordInfoRow("4. 통화가 끝나면 데이터 복구하기", value: "‘발신종료’는 활성 통화가 모두 끝날 때까지 기다립니다. 기본 60분, 최대 180분이며 대기 중 진행 표시가 나타납니다. 시간 초과에도 데이터를 복구하도록 ‘켜기’는 종료 결과와 관계없이 실행하세요. 단축어가 중단됐다면 데이터를 직접 켜 주세요.")
                     AirRecordInfoRow("첫 통화 확인", value: "발신 감지는 단축어에서 따로 시험할 수 있습니다. 실제 녹음은 전화 화면의 타이머와 메모 앱에서 확인하세요. 전화 앱을 닫아도 통화는 이어질 수 있으므로 앱이 닫힐 때 VPN을 끄도록 설정하면 녹음 준비가 끊길 수 있습니다.")
+                }
+                .font(.footnote).foregroundStyle(.secondary).padding(.top, 8)
+            }
+            .font(.subheadline)
+        }
+    }
+
+    private var incomingCard: some View {
+        AirRecordCard {
+            AirRecordHeading("수신 자동화 (실험)", systemImage: "phone.arrow.down.left", tint: accent)
+            Divider()
+            Toggle("잠금 상태 통화도 녹음 시도", isOn: Binding(
+                get: { monitor.allowsLockedAttempts },
+                set: { monitor.setAllowsLockedAttempts($0) }
+            ))
+            .font(.headline)
+            Text("기본 AirRec은 잠금이 풀린 상태에서만 녹음 버튼을 누릅니다. 켜면 잠금 화면에서 받은 전화도 시도합니다. 실기기에서 아직 검증하지 않은 기능입니다.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Divider()
+            Toggle("녹음 준비 시간 60초", isOn: Binding(
+                get: { monitor.extendsPreparationWindow },
+                set: { monitor.setExtendsPreparationWindow($0) }
+            ))
+            .font(.headline)
+            Text("통화가 연결된 뒤 녹음 버튼을 찾는 시간을 20초에서 60초로 늘립니다. 전화를 받고 늦게 잠금을 풀어도 녹음을 시작할 수 있습니다.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Divider()
+            DisclosureGroup("수신 자동화란?") {
+                VStack(alignment: .leading, spacing: 12) {
+                    AirRecordInfoRow("Wi-Fi에서는", value: "LocalDevVPN이 연결돼 있고 홈과 백그라운드 AirRec이 켜져 있으면 단축어 없이도 받은 전화의 녹음을 시작합니다. 설정 > 앱 > 전화 > 수신 전화를 ‘전체 화면’으로 두세요.")
+                    AirRecordInfoRow("셀룰러에서는", value: "‘수신’ 동작은 새 수신 전화가 울리면 예를 반환합니다. Wi-Fi가 없을 때만 ‘셀룰러 데이터 끄기 → 발신종료 → 셀룰러 데이터 켜기’를 실행하고, 이 과정을 반복하는 단축어를 만드세요.")
+                    AirRecordInfoRow("인터넷 통화", value: "‘일반 전화만’을 켜 두면 보이스톡·FaceTime 같은 통화에는 예를 반환하지 않아 데이터가 꺼지지 않습니다. 일반 전화도 감지하지 못하면 기록 탭을 확인한 뒤 이 옵션을 끄고 시험하세요.")
+                    AirRecordInfoRow("수동으로 쓸 때", value: "뒷면 탭에 ‘셀룰러 데이터 끄기 → 발신종료 → 셀룰러 데이터 켜기’ 단축어를 연결하고 전화가 울릴 때 또는 받은 직후에 실행하세요.")
                 }
                 .font(.footnote).foregroundStyle(.secondary).padding(.top, 8)
             }

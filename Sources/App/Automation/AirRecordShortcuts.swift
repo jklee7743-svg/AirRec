@@ -132,6 +132,50 @@ struct WaitForAirRecordCallEndIntent: LongRunningIntent, CancellableIntent {
     }
 }
 
+/// A CallKit observation only; it never answers, records, or changes data.
+struct WaitForAirRecordIncomingCallIntent: LongRunningIntent, CancellableIntent {
+    static var title: LocalizedStringResource = "수신"
+    static var description: IntentDescription = "새 수신 전화가 울리기 시작할 때까지 기다립니다. 감지하면 예, 시간이 지나거나 중단되면 아니요를 반환합니다. 기본 60분, 최대 180분이며 대기 중 iOS 진행 표시가 나타날 수 있습니다. ‘일반 전화만’을 켜면 보이스톡·FaceTime 같은 인터넷 통화는 감지하지 않습니다. 결과가 예이고 Wi-Fi가 없을 때만 ‘셀룰러 데이터 끄기 → 발신종료 → 셀룰러 데이터 켜기’를 실행하세요. 전화를 받거나 끊지는 않습니다."
+    static var supportedModes: IntentModes { [.background] }
+    static var allowedExecutionTargets: IntentExecutionTargets { [.main] }
+
+    @Parameter(title: "최대 대기 시간(분)", default: 60)
+    var waitMinutes: Int
+
+    @Parameter(title: "일반 전화만", default: true)
+    var cellularOnly: Bool
+
+    @MainActor
+    func perform() async -> some IntentResult & ReturnsValue<Bool> {
+        AirRecordShortcutPresence.shared.recordIncomingActionRun()
+        let seconds = AirRecordIncomingWaitPolicy.boundedTimeout(TimeInterval(waitMinutes) * 60)
+        let requireCellular = cellularOnly
+        let displayProgress = progress
+        displayProgress.totalUnitCount = Int64(seconds.rounded(.up))
+        displayProgress.completedUnitCount = 0
+        displayProgress.localizedDescription = "수신 대기"
+        displayProgress.localizedAdditionalDescription = "새 수신 전화가 오면 다음 동작을 실행합니다."
+        airRecordLog("Incoming wait intent: started")
+        do {
+            let detected = try await runBackgroundWait {
+                await AirRecordIncomingCallWaiter.wait(timeout: seconds, requireCellular: requireCellular) { elapsed in
+                    displayProgress.completedUnitCount = min(
+                        displayProgress.totalUnitCount, Int64(max(0, elapsed).rounded(.down)))
+                    displayProgress.localizedAdditionalDescription = "경과 \(Int(elapsed / 60))분 · 최대 \(Int(seconds / 60))분 대기"
+                }
+            }
+            displayProgress.localizedDescription = detected ? "수신 확인됨" : "수신 대기 종료"
+            if detected { displayProgress.completedUnitCount = displayProgress.totalUnitCount }
+            airRecordLog("Incoming wait intent: result=\(detected)")
+            return .result(value: detected)
+        } catch {
+            displayProgress.localizedDescription = "수신 대기 중단됨"
+            airRecordLog("Incoming wait intent: interrupted")
+            return .result(value: false)
+        }
+    }
+}
+
 private extension LongRunningIntent where Self: CancellableIntent {
     @MainActor
     func runBackgroundWait(_ wait: @escaping @MainActor @Sendable () async -> Bool) async throws -> Bool {
@@ -169,6 +213,12 @@ struct AirRecordShortcuts: AppShortcutsProvider {
             phrases: ["\(.applicationName) 발신"],
             shortTitle: "발신",
             systemImageName: "phone.arrow.up.right"
+        )
+        AppShortcut(
+            intent: WaitForAirRecordIncomingCallIntent(),
+            phrases: ["\(.applicationName) 수신"],
+            shortTitle: "수신",
+            systemImageName: "phone.arrow.down.left"
         )
         AppShortcut(
             intent: WaitForAirRecordCallEndIntent(),
